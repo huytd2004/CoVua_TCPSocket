@@ -299,16 +299,196 @@ int is_valid_move(Match *match, int from_row, int from_col, int to_row, int to_c
     }
 }
 
-// Check for checkmate/stalemate (simplified - always returns 0)
+// Find king position
+int find_king(Match *match, int is_white, int *king_row, int *king_col)
+{
+    char king = is_white ? 'k' : 'K';
+    for (int r = 0; r < 8; r++)
+    {
+        for (int c = 0; c < 8; c++)
+        {
+            if (match->board[r][c] == king)
+            {
+                *king_row = r;
+                *king_col = c;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+// Check if current player is in check
+int is_in_check(Match *match, int is_white)
+{
+    int king_row, king_col;
+    if (!find_king(match, is_white, &king_row, &king_col))
+        return 0;
+
+    return is_square_under_attack(match, king_row, king_col, !is_white);
+}
+
+// Check if player has any legal moves
+int has_legal_moves(Match *match, int is_white)
+{
+    for (int from_r = 0; from_r < 8; from_r++)
+    {
+        for (int from_c = 0; from_c < 8; from_c++)
+        {
+            char piece = match->board[from_r][from_c];
+            if (piece == '.')
+                continue;
+
+            int is_white_piece = (piece >= 'a' && piece <= 'z');
+            if (is_white_piece != is_white)
+                continue;
+
+            // Try all possible destination squares
+            for (int to_r = 0; to_r < 8; to_r++)
+            {
+                for (int to_c = 0; to_c < 8; to_c++)
+                {
+                    if (from_r == to_r && from_c == to_c)
+                        continue;
+
+                    // Check basic move validity
+                    char dest = match->board[to_r][to_c];
+                    if (dest != '.')
+                    {
+                        int is_dest_white = (dest >= 'a' && dest <= 'z');
+                        if (is_white_piece == is_dest_white)
+                            continue;
+                    }
+
+                    // Try the move
+                    if (is_valid_move(match, from_r, from_c, to_r, to_c, is_white ? 0 : 1))
+                    {
+                        // Make temporary move
+                        char temp_dest = match->board[to_r][to_c];
+                        match->board[to_r][to_c] = piece;
+                        match->board[from_r][from_c] = '.';
+
+                        // Check if still in check after move
+                        int still_in_check = is_in_check(match, is_white);
+
+                        // Restore board
+                        match->board[from_r][from_c] = piece;
+                        match->board[to_r][to_c] = temp_dest;
+
+                        if (!still_in_check)
+                            return 1; // Found a legal move
+                    }
+                }
+            }
+        }
+    }
+    return 0; // No legal moves
+}
+
+// Check if insufficient material for checkmate
+int is_insufficient_material(Match *match)
+{
+    int white_bishops = 0, black_bishops = 0;
+    int white_knights = 0, black_knights = 0;
+    int white_pieces = 0, black_pieces = 0;
+
+    for (int r = 0; r < 8; r++)
+    {
+        for (int c = 0; c < 8; c++)
+        {
+            char piece = match->board[r][c];
+            if (piece == '.')
+                continue;
+
+            char p = tolower(piece);
+            int is_white = (piece >= 'a' && piece <= 'z');
+
+            if (p != 'k')
+            {
+                if (is_white)
+                    white_pieces++;
+                else
+                    black_pieces++;
+            }
+
+            // Count material
+            if (p == 'q' || p == 'r' || p == 'p')
+                return 0; // Has major pieces or pawns
+
+            if (p == 'b')
+            {
+                if (is_white)
+                    white_bishops++;
+                else
+                    black_bishops++;
+            }
+            if (p == 'n')
+            {
+                if (is_white)
+                    white_knights++;
+                else
+                    black_knights++;
+            }
+        }
+    }
+
+    // King vs King
+    if (white_pieces == 0 && black_pieces == 0)
+        return 1;
+
+    // King + Bishop vs King or King + Knight vs King
+    if ((white_pieces == 1 && black_pieces == 0) ||
+        (white_pieces == 0 && black_pieces == 1))
+    {
+        if ((white_bishops == 1 || white_knights == 1) ||
+            (black_bishops == 1 || black_knights == 1))
+            return 1;
+    }
+
+    // King + Bishop vs King + Bishop (same color squares would be draw but simplified)
+    if (white_bishops == 1 && black_bishops == 1 &&
+        white_knights == 0 && black_knights == 0)
+        return 1;
+
+    return 0;
+}
+
+// Check for checkmate/stalemate/draw
 int check_game_end(Match *match, char **winner, char **reason)
 {
-    // This is a simplified version
-    // In a real implementation, you would check for:
-    // - Checkmate
-    // - Stalemate
-    // - Insufficient material
-    // - 50-move rule
-    // - Threefold repetition
+    int current_is_white = (match->current_turn == 0);
+
+    // Check for insufficient material
+    if (is_insufficient_material(match))
+    {
+        *winner = "DRAW";
+        *reason = "Insufficient material";
+        return 1;
+    }
+
+    // Check if current player is in check
+    int in_check = is_in_check(match, current_is_white);
+
+    // Check if current player has legal moves
+    int has_moves = has_legal_moves(match, current_is_white);
+
+    if (!has_moves)
+    {
+        if (in_check)
+        {
+            // Checkmate
+            *winner = current_is_white ? match->black_player : match->white_player;
+            *reason = "Checkmate";
+            return 1;
+        }
+        else
+        {
+            // Stalemate
+            *winner = "DRAW";
+            *reason = "Stalemate";
+            return 1;
+        }
+    }
 
     return 0; // Game continues
 }
