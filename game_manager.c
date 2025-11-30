@@ -34,7 +34,124 @@ int notation_to_coords(const char *notation, int *row, int *col)
     return 0;
 }
 
-// Basic move validation (simplified)
+// Check if a square is under attack by opponent
+int is_square_under_attack(Match *match, int row, int col, int by_white)
+{
+    for (int r = 0; r < 8; r++)
+    {
+        for (int c = 0; c < 8; c++)
+        {
+            char piece = match->board[r][c];
+            if (piece == '.')
+                continue;
+
+            int is_white_piece = (piece >= 'a' && piece <= 'z');
+            if (is_white_piece != by_white)
+                continue;
+
+            char p = tolower(piece);
+
+            // Check if this piece can attack the target square
+            int dr = row - r;
+            int dc = col - c;
+
+            // Pawn attacks
+            if (p == 'p')
+            {
+                int dir = by_white ? -1 : 1; // White moves up (negative), black down
+                if (dr == dir && abs(dc) == 1)
+                    return 1;
+            }
+            // Knight
+            else if (p == 'n')
+            {
+                if ((abs(dr) == 2 && abs(dc) == 1) || (abs(dr) == 1 && abs(dc) == 2))
+                    return 1;
+            }
+            // Bishop
+            else if (p == 'b')
+            {
+                if (abs(dr) == abs(dc) && dr != 0)
+                {
+                    int step_r = (dr > 0) ? 1 : -1;
+                    int step_c = (dc > 0) ? 1 : -1;
+                    int check_r = r + step_r;
+                    int check_c = c + step_c;
+                    int blocked = 0;
+                    while (check_r != row || check_c != col)
+                    {
+                        if (match->board[check_r][check_c] != '.')
+                        {
+                            blocked = 1;
+                            break;
+                        }
+                        check_r += step_r;
+                        check_c += step_c;
+                    }
+                    if (!blocked)
+                        return 1;
+                }
+            }
+            // Rook
+            else if (p == 'r')
+            {
+                if (dr == 0 || dc == 0)
+                {
+                    int step_r = (dr == 0) ? 0 : ((dr > 0) ? 1 : -1);
+                    int step_c = (dc == 0) ? 0 : ((dc > 0) ? 1 : -1);
+                    int check_r = r + step_r;
+                    int check_c = c + step_c;
+                    int blocked = 0;
+                    while (check_r != row || check_c != col)
+                    {
+                        if (match->board[check_r][check_c] != '.')
+                        {
+                            blocked = 1;
+                            break;
+                        }
+                        check_r += step_r;
+                        check_c += step_c;
+                    }
+                    if (!blocked)
+                        return 1;
+                }
+            }
+            // Queen
+            else if (p == 'q')
+            {
+                if (dr == 0 || dc == 0 || abs(dr) == abs(dc))
+                {
+                    int step_r = (dr == 0) ? 0 : ((dr > 0) ? 1 : -1);
+                    int step_c = (dc == 0) ? 0 : ((dc > 0) ? 1 : -1);
+                    int check_r = r + step_r;
+                    int check_c = c + step_c;
+                    int blocked = 0;
+                    while (check_r != row || check_c != col)
+                    {
+                        if (match->board[check_r][check_c] != '.')
+                        {
+                            blocked = 1;
+                            break;
+                        }
+                        check_r += step_r;
+                        check_c += step_c;
+                    }
+                    if (!blocked)
+                        return 1;
+                }
+            }
+            // King
+            else if (p == 'k')
+            {
+                if (abs(dr) <= 1 && abs(dc) <= 1 && (dr != 0 || dc != 0))
+                    return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+// Basic move validation with piece-specific rules
 int is_valid_move(Match *match, int from_row, int from_col, int to_row, int to_col, int player_turn)
 {
     // Check bounds
@@ -66,10 +183,120 @@ int is_valid_move(Match *match, int from_row, int from_col, int to_row, int to_c
             return 0; // Can't capture own piece
     }
 
-    // Simplified: allow any move for now (just basic checks)
-    // In real implementation, add piece-specific movement rules
+    // Calculate movement
+    int dr = to_row - from_row;
+    int dc = to_col - from_col;
 
-    return 1;
+    char p = tolower(piece);
+
+    // Piece-specific movement rules
+    switch (p)
+    {
+    case 'p': // Pawn
+    {
+        int dir = is_white_piece ? -1 : 1; // White moves up, black down
+        int start_row = is_white_piece ? 6 : 1;
+
+        // Forward move
+        if (dc == 0 && dest == '.')
+        {
+            if (dr == dir)
+                return 1;
+            // Double move from start
+            if (from_row == start_row && dr == 2 * dir && match->board[from_row + dir][from_col] == '.')
+                return 1;
+        }
+        // Capture
+        if (abs(dc) == 1 && dr == dir && dest != '.')
+            return 1;
+
+        return 0;
+    }
+
+    case 'n': // Knight
+        if ((abs(dr) == 2 && abs(dc) == 1) || (abs(dr) == 1 && abs(dc) == 2))
+            return 1;
+        return 0;
+
+    case 'b': // Bishop
+        if (abs(dr) == abs(dc) && dr != 0)
+        {
+            // Check path is clear
+            int step_r = (dr > 0) ? 1 : -1;
+            int step_c = (dc > 0) ? 1 : -1;
+            int check_r = from_row + step_r;
+            int check_c = from_col + step_c;
+            while (check_r != to_row || check_c != to_col)
+            {
+                if (match->board[check_r][check_c] != '.')
+                    return 0;
+                check_r += step_r;
+                check_c += step_c;
+            }
+            return 1;
+        }
+        return 0;
+
+    case 'r': // Rook
+        if (dr == 0 || dc == 0)
+        {
+            // Check path is clear
+            int step_r = (dr == 0) ? 0 : ((dr > 0) ? 1 : -1);
+            int step_c = (dc == 0) ? 0 : ((dc > 0) ? 1 : -1);
+            int check_r = from_row + step_r;
+            int check_c = from_col + step_c;
+            while (check_r != to_row || check_c != to_col)
+            {
+                if (match->board[check_r][check_c] != '.')
+                    return 0;
+                check_r += step_r;
+                check_c += step_c;
+            }
+            return 1;
+        }
+        return 0;
+
+    case 'q': // Queen
+        if (dr == 0 || dc == 0 || abs(dr) == abs(dc))
+        {
+            // Check path is clear
+            int step_r = (dr == 0) ? 0 : ((dr > 0) ? 1 : -1);
+            int step_c = (dc == 0) ? 0 : ((dc > 0) ? 1 : -1);
+            int check_r = from_row + step_r;
+            int check_c = from_col + step_c;
+            while (check_r != to_row || check_c != to_col)
+            {
+                if (match->board[check_r][check_c] != '.')
+                    return 0;
+                check_r += step_r;
+                check_c += step_c;
+            }
+            return 1;
+        }
+        return 0;
+
+    case 'k': // King
+        if (abs(dr) <= 1 && abs(dc) <= 1 && (dr != 0 || dc != 0))
+        {
+            // Temporarily make the move to check if king would be in check
+            char temp = match->board[to_row][to_col];
+            match->board[to_row][to_col] = piece;
+            match->board[from_row][from_col] = '.';
+
+            // Check if king is under attack at new position
+            int under_attack = is_square_under_attack(match, to_row, to_col, !is_white_piece);
+
+            // Restore board
+            match->board[from_row][from_col] = piece;
+            match->board[to_row][to_col] = temp;
+
+            return !under_attack;
+        }
+        return 0;
+
+    default:
+        return 0;
+    }
 }
 
 // Check for checkmate/stalemate (simplified - always returns 0)

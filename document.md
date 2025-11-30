@@ -4,12 +4,12 @@
 
 ```
 chess_server/
-├── main.c
+├── main.c //main.c + server.h: Socket server, accept connections, tạo thread cho mỗi client
 ├── server.h
-├── client_handler.c
-├── auth_manager.c
-├── match_manager.c
-├── game_manager.c
+├── client_handler.c //Nhận JSON, parse, route đến handler phù hợp
+├── auth_manager.c //Đăng ký, đăng nhập, SHA-256 hash, session ID
+├── match_manager.c //Thách đấu, ghép cặp, tạo match, START_GAME
+├── game_manager.c //Xử lý nước đi, validate, gửi update, GAME_RESULT
 ├── cJSON.c
 ├── cJSON.h
 └── Makefile
@@ -96,13 +96,13 @@ nc localhost 8888
 # Đợi nhận INCOMING_CHALLENGE
 {"action":"ACCEPT","data":{"from":"Bob","to":"Alice"}}
 # Sau khi nhận START_GAME
-{"action":"MOVE","data":{"matchId":"M12345","from":"E7","to":"E5"}}
+{"action":"MOVE","data":{"matchId":"MB5V0OI6G","from":"B1","to":"C3"}}
 ```
 
 ### Terminal 1 - Tiếp tục:
 ```bash
 # Sau khi nhận START_GAME
-{"action":"MOVE","data":{"matchId":"M12345","from":"E2","to":"E4"}}
+{"action":"MOVE","data":{"matchId":"MB5V0OI6G","from":"A8","to":"A4"}}
 ```
 
 ## Các tính năng đã implement
