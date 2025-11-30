@@ -146,8 +146,8 @@ nc localhost 8888
 ## Mở rộng thêm
 
 Để hoàn thiện hơn, có thể thêm:
-- Validation nước đi đầy đủ (từng loại quân)
-- Kiểm tra chiếu, chiếu hết
+- Validation nước đi đầy đủ (từng loại quân) -> đã làm
+- Kiểm tra chiếu, chiếu hết -> đã làm
 - En passant, nhập thành, phong cấp
 - Timer cho mỗi nước đi
 - Lưu lịch sử trận đấu
