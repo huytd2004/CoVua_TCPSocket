@@ -1,4 +1,13 @@
-// game_manager.c
+/**
+ * game_manager.c - Game Logic Manager Module
+ *
+ * Module xử lý logic game cờ vua, bao gồm:
+ * - Kiểm tra tính hợp lệ của nước đi cho từng loại quân
+ * - Phát hiện chiếu, chiếu hết, bế tắc
+ * - Xử lý nước đi và cập nhật trạng thái bàn cờ
+ * - Xác định kết quả ván đấu
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,73 +15,100 @@
 #include "cJSON.h"
 #include "server.h"
 
-extern Match matches[];
-extern pthread_mutex_t match_mutex;
+extern Match matches[];             // Mảng các ván đấu
+extern pthread_mutex_t match_mutex; // Mutex bảo vệ truy cập matches
 
+/**
+ * game_manager_init - Khởi tạo game manager
+ */
 void game_manager_init()
 {
     // Nothing special to initialize
 }
 
-// Convert chess notation (e.g., "E2") to row, col
+/**
+ * notation_to_coords - Chuyển đổi ký hiệu cờ vua sang tọa độ
+ * @notation: Ký hiệu cờ vua (VD: "E2", "A8")
+ * @row: Pointer để lưu hàng (0-7)
+ * @col: Pointer để lưu cột (0-7)
+ *
+ * Format: [A-H][1-8] -> (row, col)
+ * VD: E2 -> row=6, col=4
+ *
+ * Return: 0 nếu thành công, -1 nếu notation không hợp lệ
+ */
 int notation_to_coords(const char *notation, int *row, int *col)
 {
     if (strlen(notation) != 2)
-        return -1;
+        return -1; // Phải đúng 2 ký tự
 
-    char file = toupper(notation[0]);
-    char rank = notation[1];
+    char file = toupper(notation[0]); // Cột (A-H)
+    char rank = notation[1];          // Hàng (1-8)
 
+    // Kiểm tra hợp lệ
     if (file < 'A' || file > 'H' || rank < '1' || rank > '8')
     {
         return -1;
     }
 
-    *col = file - 'A';
-    *row = 8 - (rank - '0'); // Row 0 is rank 8
+    *col = file - 'A';       // A=0, B=1, ..., H=7
+    *row = 8 - (rank - '0'); // Hàng 0 là rank 8 (top-down)
 
     return 0;
 }
 
-// Check if a square is under attack by opponent
+/**
+ * is_square_under_attack - Kiểm tra ô có bị tấn công không
+ * @match: Pointer đến ván đấu
+ * @row: Hàng cần kiểm tra
+ * @col: Cột cần kiểm tra
+ * @by_white: 1 nếu kiểm tra bị quân trắng tấn công, 0 nếu quân đen
+ *
+ * Kiểm tra xem ô (row, col) có bị quân của by_white tấn công không.
+ * Dùng để kiểm tra vua có bị chiếu hay không được đi vào ô nguy hiểm.
+ *
+ * Return: 1 nếu bị tấn công, 0 nếu an toàn
+ */
 int is_square_under_attack(Match *match, int row, int col, int by_white)
 {
+    // Duyệt qua toàn bộ bàn cờ
     for (int r = 0; r < 8; r++)
     {
         for (int c = 0; c < 8; c++)
         {
             char piece = match->board[r][c];
-            if (piece == '.')
+            if (piece == '.') // Ô trống
                 continue;
 
-            int is_white_piece = (piece >= 'a' && piece <= 'z');
+            int is_white_piece = (piece >= 'a' && piece <= 'z'); // lowercase = trắng
             if (is_white_piece != by_white)
-                continue;
+                continue; // Không phải quân của by_white
 
             char p = tolower(piece);
 
-            // Check if this piece can attack the target square
-            int dr = row - r;
-            int dc = col - c;
+            // Kiểm tra xem quân này có thể tấn công ô mục tiêu không
+            int dr = row - r; // Khoảng cách hàng
+            int dc = col - c; // Khoảng cách cột
 
-            // Pawn attacks
+            // Tốt (Pawn) - chỉ tấn công chéo
             if (p == 'p')
             {
-                int dir = by_white ? -1 : 1; // White moves up (negative), black down
-                if (dr == dir && abs(dc) == 1)
+                int dir = by_white ? -1 : 1;   // Trắng đi lên (-), đen đi xuống (+)
+                if (dr == dir && abs(dc) == 1) // Tấn công chéo 1 ô
                     return 1;
             }
-            // Knight
+            // Mã (Knight) - đi chữ L
             else if (p == 'n')
             {
                 if ((abs(dr) == 2 && abs(dc) == 1) || (abs(dr) == 1 && abs(dc) == 2))
                     return 1;
             }
-            // Bishop
+            // Tượng (Bishop) - đi chéo
             else if (p == 'b')
             {
                 if (abs(dr) == abs(dc) && dr != 0)
                 {
+                    // Kiểm tra đường đi không bị chặn
                     int step_r = (dr > 0) ? 1 : -1;
                     int step_c = (dc > 0) ? 1 : -1;
                     int check_r = r + step_r;
@@ -80,7 +116,7 @@ int is_square_under_attack(Match *match, int row, int col, int by_white)
                     int blocked = 0;
                     while (check_r != row || check_c != col)
                     {
-                        if (match->board[check_r][check_c] != '.')
+                        if (match->board[check_r][check_c] != '.') // Có quân chặn
                         {
                             blocked = 1;
                             break;
@@ -92,7 +128,7 @@ int is_square_under_attack(Match *match, int row, int col, int by_white)
                         return 1;
                 }
             }
-            // Rook
+            // Xe (Rook) - đi ngang/dọc
             else if (p == 'r')
             {
                 if (dr == 0 || dc == 0)
@@ -116,10 +152,10 @@ int is_square_under_attack(Match *match, int row, int col, int by_white)
                         return 1;
                 }
             }
-            // Queen
+            // Hậu (Queen) - kết hợp xe + tượng
             else if (p == 'q')
             {
-                if (dr == 0 || dc == 0 || abs(dr) == abs(dc))
+                if (dr == 0 || dc == 0 || abs(dr) == abs(dc)) // Ngang/dọc hoặc chéo
                 {
                     int step_r = (dr == 0) ? 0 : ((dr > 0) ? 1 : -1);
                     int step_c = (dc == 0) ? 0 : ((dc > 0) ? 1 : -1);
@@ -140,7 +176,7 @@ int is_square_under_attack(Match *match, int row, int col, int by_white)
                         return 1;
                 }
             }
-            // King
+            // Vua (King) - đi 1 ô mọi hướng
             else if (p == 'k')
             {
                 if (abs(dr) <= 1 && abs(dc) <= 1 && (dr != 0 || dc != 0))
@@ -151,10 +187,25 @@ int is_square_under_attack(Match *match, int row, int col, int by_white)
     return 0;
 }
 
-// Basic move validation with piece-specific rules
+/**
+ * is_valid_move - Kiểm tra tính hợp lệ của nước đi
+ * @match: Pointer đến ván đấu
+ * @from_row, @from_col: Tọa độ xuất phát
+ * @to_row, @to_col: Tọa độ đích
+ * @player_turn: 0 = trắng, 1 = đen
+ *
+ * Kiểm tra:
+ * - Ranh giới bàn cờ
+ * - Quân cờ đúng màu
+ * - Quy tắc di chuyển của từng loại quân
+ * - Đường đi không bị chặn
+ * - Vua không đi vào chiếu
+ *
+ * Return: 1 nếu hợp lệ, 0 nếu không hợp lệ
+ */
 int is_valid_move(Match *match, int from_row, int from_col, int to_row, int to_col, int player_turn)
 {
-    // Check bounds
+    // Kiểm tra ranh giới
     if (from_row < 0 || from_row > 7 || from_col < 0 || from_col > 7 ||
         to_row < 0 || to_row > 7 || to_col < 0 || to_col > 7)
     {
@@ -163,72 +214,72 @@ int is_valid_move(Match *match, int from_row, int from_col, int to_row, int to_c
 
     char piece = match->board[from_row][from_col];
 
-    // Check if there's a piece at source
+    // Kiểm tra có quân tại ô xuất phát
     if (piece == '.')
         return 0;
 
-    // Check if it's the correct player's piece
-    int is_white_piece = (piece >= 'a' && piece <= 'z');
+    // Kiểm tra quân đúng màu
+    int is_white_piece = (piece >= 'a' && piece <= 'z'); // Lowercase = trắng
     if (player_turn == 0 && !is_white_piece)
-        return 0; // White's turn
+        return 0; // Lượt trắng nhưng chọn quân đen
     if (player_turn == 1 && is_white_piece)
-        return 0; // Black's turn
+        return 0; // Lượt đen nhưng chọn quân trắng
 
-    // Check if destination has own piece
+    // Kiểm tra không ăn quân cùng màu
     char dest = match->board[to_row][to_col];
     if (dest != '.')
     {
         int is_dest_white = (dest >= 'a' && dest <= 'z');
         if (is_white_piece == is_dest_white)
-            return 0; // Can't capture own piece
+            return 0; // Không thể ăn quân của mình
     }
 
-    // Calculate movement
+    // Tính toán chuyển động
     int dr = to_row - from_row;
     int dc = to_col - from_col;
 
     char p = tolower(piece);
 
-    // Piece-specific movement rules
+    // Quy tắc di chuyển theo từng loại quân
     switch (p)
     {
-    case 'p': // Pawn
+    case 'p': // Tốt (Pawn)
     {
-        int dir = is_white_piece ? -1 : 1; // White moves up, black down
-        int start_row = is_white_piece ? 6 : 1;
+        int dir = is_white_piece ? -1 : 1;      // Trắng lên, đen xuống
+        int start_row = is_white_piece ? 6 : 1; // Hàng bắt đầu
 
-        // Forward move
-        if (dc == 0 && dest == '.')
+        // Di chuyển tiến
+        if (dc == 0 && dest == '.') // Phải là ô trống
         {
-            if (dr == dir)
+            if (dr == dir) // Đi 1 ô
                 return 1;
-            // Double move from start
+            // Đi 2 ô từ vị trí xuất phát
             if (from_row == start_row && dr == 2 * dir && match->board[from_row + dir][from_col] == '.')
                 return 1;
         }
-        // Capture
-        if (abs(dc) == 1 && dr == dir && dest != '.')
+        // Ăn chéo
+        if (abs(dc) == 1 && dr == dir && dest != '.') // Phải có quân đối phương
             return 1;
 
         return 0;
     }
 
-    case 'n': // Knight
+    case 'n': // Mã (Knight) - đi chữ L
         if ((abs(dr) == 2 && abs(dc) == 1) || (abs(dr) == 1 && abs(dc) == 2))
             return 1;
         return 0;
 
-    case 'b': // Bishop
+    case 'b': // Tượng (Bishop) - đi chéo
         if (abs(dr) == abs(dc) && dr != 0)
         {
-            // Check path is clear
+            // Kiểm tra đường đi không bị chặn
             int step_r = (dr > 0) ? 1 : -1;
             int step_c = (dc > 0) ? 1 : -1;
             int check_r = from_row + step_r;
             int check_c = from_col + step_c;
             while (check_r != to_row || check_c != to_col)
             {
-                if (match->board[check_r][check_c] != '.')
+                if (match->board[check_r][check_c] != '.') // Có quân chặn
                     return 0;
                 check_r += step_r;
                 check_c += step_c;
@@ -237,10 +288,10 @@ int is_valid_move(Match *match, int from_row, int from_col, int to_row, int to_c
         }
         return 0;
 
-    case 'r': // Rook
+    case 'r': // Xe (Rook) - ngang/dọc
         if (dr == 0 || dc == 0)
         {
-            // Check path is clear
+            // Kiểm tra đường đi
             int step_r = (dr == 0) ? 0 : ((dr > 0) ? 1 : -1);
             int step_c = (dc == 0) ? 0 : ((dc > 0) ? 1 : -1);
             int check_r = from_row + step_r;
@@ -256,10 +307,10 @@ int is_valid_move(Match *match, int from_row, int from_col, int to_row, int to_c
         }
         return 0;
 
-    case 'q': // Queen
+    case 'q': // Hậu (Queen) - kết hợp xe + tượng
         if (dr == 0 || dc == 0 || abs(dr) == abs(dc))
         {
-            // Check path is clear
+            // Kiểm tra đường đi
             int step_r = (dr == 0) ? 0 : ((dr > 0) ? 1 : -1);
             int step_c = (dc == 0) ? 0 : ((dc > 0) ? 1 : -1);
             int check_r = from_row + step_r;
@@ -275,22 +326,22 @@ int is_valid_move(Match *match, int from_row, int from_col, int to_row, int to_c
         }
         return 0;
 
-    case 'k': // King
+    case 'k': // Vua (King) - 1 ô mọi hướng
         if (abs(dr) <= 1 && abs(dc) <= 1 && (dr != 0 || dc != 0))
         {
-            // Temporarily make the move to check if king would be in check
+            // Tạm thời thực hiện nước đi để kiểm tra vua có bị chiếu không
             char temp = match->board[to_row][to_col];
             match->board[to_row][to_col] = piece;
             match->board[from_row][from_col] = '.';
 
-            // Check if king is under attack at new position
+            // Kiểm tra vua có bị tấn công ở vị trí mới không
             int under_attack = is_square_under_attack(match, to_row, to_col, !is_white_piece);
 
-            // Restore board
+            // Khôi phục bàn cờ
             match->board[from_row][from_col] = piece;
             match->board[to_row][to_col] = temp;
 
-            return !under_attack;
+            return !under_attack; // Chỉ hợp lệ nếu không bị chiếu
         }
         return 0;
 
@@ -299,10 +350,13 @@ int is_valid_move(Match *match, int from_row, int from_col, int to_row, int to_c
     }
 }
 
-// Find king position
+/**
+ * find_king - Tìm vị trí vua trên bàn cờ
+ * Return: 1 nếu tìm thấy, 0 nếu không
+ */
 int find_king(Match *match, int is_white, int *king_row, int *king_col)
 {
-    char king = is_white ? 'k' : 'K';
+    char king = is_white ? 'k' : 'K'; // lowercase=trắng, uppercase=đen
     for (int r = 0; r < 8; r++)
     {
         for (int c = 0; c < 8; c++)
@@ -318,7 +372,10 @@ int find_king(Match *match, int is_white, int *king_row, int *king_col)
     return 0;
 }
 
-// Check if current player is in check
+/**
+ * is_in_check - Kiểm tra vua có bị chiếu không
+ * Return: 1 nếu bị chiếu, 0 nếu an toàn
+ */
 int is_in_check(Match *match, int is_white)
 {
     int king_row, king_col;
@@ -328,7 +385,10 @@ int is_in_check(Match *match, int is_white)
     return is_square_under_attack(match, king_row, king_col, !is_white);
 }
 
-// Check if player has any legal moves
+/**
+ * has_legal_moves - Kiểm tra còn nước đi hợp lệ không
+ * Return: 1 nếu còn nước đi, 0 nếu hết nước
+ */
 int has_legal_moves(Match *match, int is_white)
 {
     for (int from_r = 0; from_r < 8; from_r++)

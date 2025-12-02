@@ -96,13 +96,13 @@ nc localhost 8888
 # Đợi nhận INCOMING_CHALLENGE
 {"action":"ACCEPT","data":{"from":"Bob","to":"Alice"}}
 # Sau khi nhận START_GAME
-{"action":"MOVE","data":{"matchId":"MB5V0OI6G","from":"B1","to":"C3"}}
+{"action":"MOVE","data":{"matchId":"M97NSTBSV","from":"D4","to":"E5"}}
 ```
 
 ### Terminal 1 - Tiếp tục:
 ```bash
 # Sau khi nhận START_GAME
-{"action":"MOVE","data":{"matchId":"MB5V0OI6G","from":"A8","to":"A4"}}
+{"action":"MOVE","data":{"matchId":"M97NSTBSV","from":"E5","to":"E6"}}
 ```
 
 ## Các tính năng đã implement
