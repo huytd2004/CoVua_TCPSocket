@@ -62,6 +62,9 @@ int main()
     auth_manager_init();  // Module xác thực người dùng
     match_manager_init(); // Module quản lý ván đấu
     game_manager_init();  // Module logic game cờ vua
+    game_control_init();  // Module điều khiển ván cờ
+    match_history_init(); // Module lịch sử ván đấu
+    matchmaking_start();  // Khởi động matchmaking background thread
 
     // Khởi tạo mảng clients - đánh dấu tất cả slot là trống
     for (int i = 0; i < MAX_CLIENTS; i++)

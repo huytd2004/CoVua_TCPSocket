@@ -150,6 +150,10 @@ void process_message(int client_idx, const char *message)
     {
         handle_request_player_list(client_idx); // Lấy danh sách người chơi
     }
+    else if (strcmp(action, "GET_PROFILE") == 0)
+    {
+        handle_get_profile(client_idx, data_obj); // Xem hồ sơ người chơi
+    }
     else if (strcmp(action, "CHALLENGE") == 0)
     {
         handle_challenge(client_idx, data_obj); // Gửi lời thách đấu
@@ -165,6 +169,60 @@ void process_message(int client_idx, const char *message)
     else if (strcmp(action, "MOVE") == 0)
     {
         handle_move(client_idx, data_obj); // Xử lý nước đi
+    }
+    else if (strcmp(action, "FIND_MATCH") == 0)
+    {
+        handle_find_match(client_idx, data_obj); // Tìm trận tự động
+    }
+    else if (strcmp(action, "CANCEL_FIND_MATCH") == 0)
+    {
+        handle_cancel_find_match(client_idx, data_obj); // Hủy tìm trận
+    }
+    // === GAME CONTROL ACTIONS ===
+    else if (strcmp(action, "OFFER_ABORT") == 0)
+    {
+        handle_offer_abort(client_idx, data_obj);
+    }
+    else if (strcmp(action, "ACCEPT_ABORT") == 0)
+    {
+        handle_accept_abort(client_idx, data_obj);
+    }
+    else if (strcmp(action, "DECLINE_ABORT") == 0)
+    {
+        handle_decline_abort(client_idx, data_obj);
+    }
+    else if (strcmp(action, "OFFER_DRAW") == 0)
+    {
+        handle_offer_draw(client_idx, data_obj);
+    }
+    else if (strcmp(action, "ACCEPT_DRAW") == 0)
+    {
+        handle_accept_draw(client_idx, data_obj);
+    }
+    else if (strcmp(action, "DECLINE_DRAW") == 0)
+    {
+        handle_decline_draw(client_idx, data_obj);
+    }
+    else if (strcmp(action, "OFFER_REMATCH") == 0)
+    {
+        handle_offer_rematch(client_idx, data_obj);
+    }
+    else if (strcmp(action, "ACCEPT_REMATCH") == 0)
+    {
+        handle_accept_rematch(client_idx, data_obj);
+    }
+    else if (strcmp(action, "DECLINE_REMATCH") == 0)
+    {
+        handle_decline_rematch(client_idx, data_obj);
+    }
+    // === MATCH HISTORY ACTIONS ===
+    else if (strcmp(action, "GET_MATCH_HISTORY") == 0)
+    {
+        handle_get_match_history(client_idx, data_obj);
+    }
+    else if (strcmp(action, "GET_MATCH_REPLAY") == 0)
+    {
+        handle_get_match_replay(client_idx, data_obj);
     }
     else if (strcmp(action, "PING") == 0)
     {

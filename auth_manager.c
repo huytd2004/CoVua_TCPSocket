@@ -16,10 +16,12 @@
 #define MAX_USERS 1000          // Số lượng user tối đa
 #define USERS_FILE "users.json" // File lưu trữ thông tin users
 
-// Biến static - chỉ truy cập trong module này
-static User users[MAX_USERS];                                  // Mảng lưu thông tin users
-static int user_count = 0;                                     // Số lượng users hiện tại
-static pthread_mutex_t auth_mutex = PTHREAD_MUTEX_INITIALIZER; // Mutex bảo vệ truy cập users
+// Biến toàn cục - có thể truy cập từ elo_manager.c
+User users[MAX_USERS];                                  // Mảng lưu thông tin users
+int user_count = 0;                                     // Số lượng users hiện tại
+pthread_mutex_t auth_mutex = PTHREAD_MUTEX_INITIALIZER; // Mutex bảo vệ truy cập users
+
+#define DEFAULT_ELO 1200 // ELO mặc định cho người chơi mới
 
 /**
  * sha256_string - Hash chuỗi bằng thuật toán SHA-256
@@ -110,6 +112,18 @@ void auth_manager_init()
                         strncpy(users[user_count].username, username->valuestring, MAX_USERNAME - 1);
                         strncpy(users[user_count].password_hash, password_hash->valuestring, 64);
                         users[user_count].is_online = 0; // Ban đầu offline
+
+                        // Load ELO và thống kê
+                        cJSON *elo = cJSON_GetObjectItem(user_obj, "elo_rating");
+                        cJSON *wins = cJSON_GetObjectItem(user_obj, "wins");
+                        cJSON *losses = cJSON_GetObjectItem(user_obj, "losses");
+                        cJSON *draws = cJSON_GetObjectItem(user_obj, "draws");
+
+                        users[user_count].elo_rating = elo ? elo->valueint : DEFAULT_ELO;
+                        users[user_count].wins = wins ? wins->valueint : 0;
+                        users[user_count].losses = losses ? losses->valueint : 0;
+                        users[user_count].draws = draws ? draws->valueint : 0;
+
                         user_count++;
                     }
                 }
@@ -141,6 +155,10 @@ void save_users()
         cJSON *user_obj = cJSON_CreateObject();
         cJSON_AddStringToObject(user_obj, "username", users[i].username);
         cJSON_AddStringToObject(user_obj, "password_hash", users[i].password_hash);
+        cJSON_AddNumberToObject(user_obj, "elo_rating", users[i].elo_rating);
+        cJSON_AddNumberToObject(user_obj, "wins", users[i].wins);
+        cJSON_AddNumberToObject(user_obj, "losses", users[i].losses);
+        cJSON_AddNumberToObject(user_obj, "draws", users[i].draws);
         cJSON_AddItemToArray(users_array, user_obj);
     }
 
@@ -236,6 +254,10 @@ int handle_register(int client_idx, cJSON *data)
     strncpy(users[user_count].username, username, MAX_USERNAME - 1);
     sha256_string(password, users[user_count].password_hash); // Hash password
     users[user_count].is_online = 0;
+    users[user_count].elo_rating = DEFAULT_ELO; // ELO mặc định
+    users[user_count].wins = 0;
+    users[user_count].losses = 0;
+    users[user_count].draws = 0;
     user_count++;
 
     save_users(); // Lưu vào file
@@ -452,6 +474,83 @@ int handle_request_player_list(int client_idx)
 
     send_json(client_idx, response);
     cJSON_Delete(response);
+
+    return 0;
+}
+
+/**
+ * handle_get_profile - Xử lý yêu cầu xem hồ sơ người chơi
+ * @client_idx: Index của client yêu cầu
+ * @data: JSON object chứa username cần xem
+ *
+ * Client gửi: {"action": "GET_PROFILE", "data": {"username": "..."}}
+ * Server trả về: {"action": "PROFILE_INFO", "data": {...}}
+ *
+ * Return: 0 nếu thành công, -1 nếu thất bại
+ */
+int handle_get_profile(int client_idx, cJSON *data)
+{
+    // Kiểm tra data hợp lệ
+    if (!data)
+    {
+        send_error(client_idx, "Missing data");
+        return -1;
+    }
+
+    // Lấy username từ JSON
+    cJSON *username_obj = cJSON_GetObjectItem(data, "username");
+    if (!username_obj || !cJSON_IsString(username_obj))
+    {
+        send_error(client_idx, "Missing username field");
+        return -1;
+    }
+
+    const char *username = username_obj->valuestring;
+
+    pthread_mutex_lock(&auth_mutex);
+
+    // Tìm user trong database
+    int user_idx = find_user(username);
+    if (user_idx == -1)
+    {
+        pthread_mutex_unlock(&auth_mutex);
+
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddStringToObject(response, "action", "PROFILE_ERROR");
+        cJSON *resp_data = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp_data, "reason", "User not found");
+        cJSON_AddItemToObject(response, "data", resp_data);
+        send_json(client_idx, response);
+        cJSON_Delete(response);
+        return -1;
+    }
+
+    // Lấy thông tin user
+    int elo = users[user_idx].elo_rating;
+    int wins = users[user_idx].wins;
+    int losses = users[user_idx].losses;
+    int draws = users[user_idx].draws;
+    int is_online = users[user_idx].is_online;
+
+    pthread_mutex_unlock(&auth_mutex);
+
+    // Tạo response
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddStringToObject(response, "action", "PROFILE_INFO");
+    cJSON *resp_data = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp_data, "username", username);
+    cJSON_AddNumberToObject(resp_data, "elo", elo);
+    cJSON_AddNumberToObject(resp_data, "wins", wins);
+    cJSON_AddNumberToObject(resp_data, "losses", losses);
+    cJSON_AddNumberToObject(resp_data, "draws", draws);
+    cJSON_AddBoolToObject(resp_data, "online", is_online);
+    cJSON_AddItemToObject(response, "data", resp_data);
+
+    send_json(client_idx, response);
+    cJSON_Delete(response);
+
+    printf("Profile requested: %s (ELO: %d, W/L/D: %d/%d/%d)\n",
+           username, elo, wins, losses, draws);
 
     return 0;
 }

@@ -17,6 +17,9 @@
 
 #define MAX_MATCHES 50 // Số lượng ván đấu tối đa
 
+// Forward declaration từ match_history.c
+void start_recording_match(const char *match_id);
+
 // Biến toàn cục - không dùng static để có thể truy cập từ module khác
 Match matches[MAX_MATCHES];                              // Mảng lưu thông tin các ván đấu
 pthread_mutex_t match_mutex = PTHREAD_MUTEX_INITIALIZER; // Mutex bảo vệ truy cập matches
@@ -185,7 +188,30 @@ int create_match(int challenger_idx, int opponent_idx)
     match->current_turn = 0;  // Quân trắng đi trước
     match->is_active = 1;     // Đánh dấu ván đấu active
 
+    // Khởi tạo các trường cho luật nâng cao
+    match->white_king_moved = 0;
+    match->black_king_moved = 0;
+    match->white_rook_a_moved = 0;
+    match->white_rook_h_moved = 0;
+    match->black_rook_a_moved = 0;
+    match->black_rook_h_moved = 0;
+    match->en_passant_col = -1; // -1 = không có en passant
+    match->last_move_from_row = -1;
+    match->last_move_from_col = -1;
+    match->last_move_to_row = -1;
+    match->last_move_to_col = -1;
+    match->halfmove_clock = 0;
+    match->fullmove_number = 1;
+
+    // Lưu match_id trước khi unlock để gọi start_recording_match
+    char match_id_copy[32];
+    strncpy(match_id_copy, match->match_id, 31);
+    match_id_copy[31] = '\0';
+
     pthread_mutex_unlock(&match_mutex);
+
+    // Bắt đầu ghi nhận nước đi cho ván đấu
+    start_recording_match(match_id_copy);
 
     // Cập nhật trạng thái người chơi
     pthread_mutex_lock(&clients_mutex);
@@ -213,6 +239,96 @@ int create_match(int challenger_idx, int opponent_idx)
     cJSON_Delete(start_game);
 
     printf("Match created: %s vs %s (Match ID: %s)\n",
+           match->white_player, match->black_player, match->match_id);
+
+    return match_idx;
+}
+
+/**
+ * create_match_with_colors - Tạo ván đấu với màu quân xác định
+ * @white_idx: Index của người chơi quân trắng
+ * @black_idx: Index của người chơi quân đen
+ *
+ * Tương tự create_match nhưng không random màu quân.
+ * Dùng cho rematch (đổi màu quân).
+ *
+ * Return: Index của ván đấu, -1 nếu thất bại
+ */
+int create_match_with_colors(int white_idx, int black_idx)
+{
+    pthread_mutex_lock(&match_mutex);
+
+    int match_idx = find_free_match_slot();
+    if (match_idx == -1)
+    {
+        pthread_mutex_unlock(&match_mutex);
+        send_error(white_idx, "No available match slots");
+        return -1;
+    }
+
+    Match *match = &matches[match_idx];
+    generate_match_id(match->match_id, 10);
+
+    // Gán màu quân theo tham số (không random)
+    pthread_mutex_lock(&clients_mutex);
+    strncpy(match->white_player, clients[white_idx].username, MAX_USERNAME - 1);
+    strncpy(match->black_player, clients[black_idx].username, MAX_USERNAME - 1);
+    pthread_mutex_unlock(&clients_mutex);
+
+    match->white_client_idx = white_idx;
+    match->black_client_idx = black_idx;
+
+    init_board(match->board);
+    match->current_turn = 0;
+    match->is_active = 1;
+
+    // Khởi tạo các trường cho luật nâng cao
+    match->white_king_moved = 0;
+    match->black_king_moved = 0;
+    match->white_rook_a_moved = 0;
+    match->white_rook_h_moved = 0;
+    match->black_rook_a_moved = 0;
+    match->black_rook_h_moved = 0;
+    match->en_passant_col = -1;
+    match->last_move_from_row = -1;
+    match->last_move_from_col = -1;
+    match->last_move_to_row = -1;
+    match->last_move_to_col = -1;
+    match->halfmove_clock = 0;
+    match->fullmove_number = 1;
+
+    // Lưu match_id trước khi unlock để gọi start_recording_match
+    char match_id_copy[32];
+    strncpy(match_id_copy, match->match_id, 31);
+    match_id_copy[31] = '\0';
+
+    pthread_mutex_unlock(&match_mutex);
+
+    // Bắt đầu ghi nhận nước đi cho ván đấu (rematch)
+    start_recording_match(match_id_copy);
+
+    // Cập nhật trạng thái người chơi
+    pthread_mutex_lock(&clients_mutex);
+    clients[white_idx].status = STATUS_IN_MATCH;
+    clients[black_idx].status = STATUS_IN_MATCH;
+    pthread_mutex_unlock(&clients_mutex);
+
+    // Tạo JSON message START_GAME
+    cJSON *start_game = cJSON_CreateObject();
+    cJSON_AddStringToObject(start_game, "action", "START_GAME");
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "matchId", match->match_id);
+    cJSON_AddStringToObject(data, "white", match->white_player);
+    cJSON_AddStringToObject(data, "black", match->black_player);
+    cJSON_AddStringToObject(data, "board", "Initial position");
+    cJSON_AddBoolToObject(data, "isRematch", 1);
+    cJSON_AddItemToObject(start_game, "data", data);
+
+    send_json(white_idx, start_game);
+    send_json(black_idx, start_game);
+    cJSON_Delete(start_game);
+
+    printf("Rematch created: %s (white) vs %s (black) (Match ID: %s)\n",
            match->white_player, match->black_player, match->match_id);
 
     return match_idx;
